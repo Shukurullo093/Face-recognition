@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from app.core.config import Settings
+from app.core.imaging import make_face_thumbnail
 from app.core.logging import get_logger
 from app.db.session import AsyncSessionFactory
 from app.models.face import Face
@@ -135,6 +136,7 @@ class BulkImportService:
                     det_score=result.detection.score,
                     quality=result.detection.score,
                     image_path=str(img_path),
+                    thumbnail=make_face_thumbnail(image, result.detection.bbox),
                 )
             )
             job.succeeded += 1

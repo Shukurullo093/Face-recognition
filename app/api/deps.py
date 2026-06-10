@@ -6,22 +6,31 @@ shared ML pipeline into services via DI, so business code stays decoupled.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, Request
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, Request, Security
+from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings, get_settings
-from app.core.exceptions import AuthenticationError, AuthorizationError
-from app.core.security import Role, decode_access_token
+from app.core.config import Settings, get_settings, settings as _settings
+from app.core.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    RateLimitExceededError,
+)
+from app.core.rate_limit import external_rate_limiter, parse_rate
+from app.core.security import Role, decode_access_token, hash_api_key
 from app.db.session import get_db
+from app.models.api_key import ApiKey
 from app.recognition.pipeline import RecognitionPipeline
+from app.repositories.api_key_repo import ApiKeyRepository
 from app.repositories.face_repo import FaceRepository
 from app.repositories.log_repo import RecognitionLogRepository
 from app.repositories.person_repo import PersonRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.auth import TokenPayload
+from app.services.api_key_service import ApiKeyService
 from app.services.auth_service import AuthService
 from app.services.bulk_import_service import BulkImportService
 from app.services.recognition_service import RecognitionService
@@ -102,6 +111,52 @@ def get_bulk_import_service(settings: SettingsDep, pipeline: PipelineDep) -> Bul
     return BulkImportService(pipeline=pipeline, settings=settings)
 
 
+def get_api_key_service(db: DBDep) -> ApiKeyService:
+    return ApiKeyService(ApiKeyRepository(db))
+
+
+# ---------- API-key (3rd-party) auth ----------
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def get_api_key(
+    db: DBDep, key: Annotated[str | None, Security(_api_key_header)]
+) -> ApiKey:
+    if not key:
+        raise AuthenticationError("Missing X-API-Key header")
+    repo = ApiKeyRepository(db)
+    entity = await repo.get_active_by_hash(hash_api_key(key))
+    if entity is None:
+        raise AuthenticationError("Invalid or revoked API key")
+    limit, window = parse_rate(_settings.EXTERNAL_RATE_LIMIT)
+    if not external_rate_limiter.allow(str(entity.id), limit, window):
+        raise RateLimitExceededError(f"API key rate limit exceeded ({_settings.EXTERNAL_RATE_LIMIT})")
+    await repo.touch(entity.id, datetime.now(UTC))  # committed by get_db
+    return entity
+
+
+def get_external_recognition_service(
+    request: Request,
+    db: DBDep,
+    settings: SettingsDep,
+    pipeline: PipelineDep,
+    api_key: Annotated[ApiKey, Depends(get_api_key)],
+) -> RecognitionService:
+    return RecognitionService(
+        pipeline=pipeline,
+        person_repo=PersonRepository(db),
+        face_repo=FaceRepository(db, ef_search=settings.HNSW_EF_SEARCH),
+        log_repo=RecognitionLogRepository(db),
+        settings=settings,
+        actor=f"apikey:{api_key.name}",
+        client_ip=request.client.host if request.client else None,
+    )
+
+
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 RecognitionServiceDep = Annotated[RecognitionService, Depends(get_recognition_service)]
 BulkImportServiceDep = Annotated[BulkImportService, Depends(get_bulk_import_service)]
+ApiKeyServiceDep = Annotated[ApiKeyService, Depends(get_api_key_service)]
+ExternalRecognitionServiceDep = Annotated[
+    RecognitionService, Depends(get_external_recognition_service)
+]

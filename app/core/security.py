@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import enum
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -59,3 +61,20 @@ def decode_access_token(token: str) -> dict[str, Any]:
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except JWTError as exc:
         raise AuthenticationError("Invalid or expired token") from exc
+
+
+# ---- API keys (machine-to-machine) ----
+API_KEY_PREFIX = "frk_"
+
+
+def generate_api_key() -> tuple[str, str, str]:
+    """Return (raw_key, sha256_hash, display_prefix).
+
+    The raw key is shown to the caller exactly once; only the hash is stored.
+    """
+    raw = API_KEY_PREFIX + secrets.token_urlsafe(32)
+    return raw, hash_api_key(raw), raw[:12]
+
+
+def hash_api_key(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()

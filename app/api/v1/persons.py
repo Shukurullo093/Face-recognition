@@ -6,11 +6,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from fastapi import Response
+
 from app.api.deps import DBDep, require_operator, require_viewer
 from app.core.exceptions import EntityConflictError, EntityNotFoundError
 from app.models.person import Person
 from app.repositories.person_repo import PersonRepository
-from app.schemas.person import PersonCreate, PersonRead
+from app.schemas.person import PersonCreate, PersonRead, PersonUpdate
 
 router = APIRouter(prefix="/persons", tags=["persons"])
 
@@ -60,3 +62,43 @@ async def get_person(person_id: uuid.UUID, db: DBDep) -> Person:
     if person is None:
         raise EntityNotFoundError(f"Person {person_id} not found")
     return person
+
+
+@router.patch(
+    "/{person_id}",
+    response_model=PersonRead,
+    dependencies=[Depends(require_operator)],
+    summary="Update a person",
+)
+async def update_person(person_id: uuid.UUID, payload: PersonUpdate, db: DBDep) -> Person:
+    repo = PersonRepository(db)
+    person = await repo.get(person_id)
+    if person is None:
+        raise EntityNotFoundError(f"Person {person_id} not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "external_id" in data and data["external_id"] and data["external_id"] != person.external_id:
+        if await repo.get_by_external_id(data["external_id"]):
+            raise EntityConflictError(f"external_id '{data['external_id']}' already exists")
+    if "metadata" in data:
+        person.meta = data.pop("metadata")
+    for field, value in data.items():
+        setattr(person, field, value)
+    await db.flush()
+    await db.refresh(person)  # load server-side onupdate (updated_at) before serializing
+    return person
+
+
+@router.delete(
+    "/{person_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+    dependencies=[Depends(require_operator)],
+    summary="Delete a person (cascades to their faces)",
+)
+async def delete_person(person_id: uuid.UUID, db: DBDep) -> None:
+    repo = PersonRepository(db)
+    person = await repo.get(person_id)
+    if person is None:
+        raise EntityNotFoundError(f"Person {person_id} not found")
+    await repo.delete(person)

@@ -65,6 +65,11 @@ class AuthorizationError(DomainError):
     code = "authorization_error"
 
 
+class RateLimitExceededError(DomainError):
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "rate_limited"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach handlers that translate domain errors -> JSON responses."""
 

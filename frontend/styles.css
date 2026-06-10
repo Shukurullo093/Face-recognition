@@ -314,7 +314,9 @@ body::after {
 @media (max-width: 1080px){ .scan-cols { grid-template-columns: 1fr; } }
 
 .viewfinder {
-  position: relative; aspect-ratio: 4/3; width: 100%;
+  /* Capped to the viewport so the page never overflows; the image uses
+     object-fit: contain, so a non-4:3 box is fine. */
+  position: relative; width: 100%; height: clamp(260px, 46vh, 440px);
   background: var(--bg-2) repeating-linear-gradient(45deg, rgba(255,255,255,.012) 0 1px, transparent 1px 9px);
   border: 1px solid var(--line); border-radius: var(--r-lg);
   display: grid; place-items: center; overflow: hidden;
@@ -506,6 +508,93 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 
 .empty { text-align: center; padding: 40px 20px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 .empty svg { width: 36px; height: 36px; opacity: .4; margin-bottom: 12px; }
+
+/* ============================================================================
+   FACE GALLERY
+   ============================================================================ */
+.gallery-cols { display: grid; grid-template-columns: 1fr 320px; gap: 22px; align-items: start; }
+@media (max-width: 1080px){ .gallery-cols { grid-template-columns: 1fr; } }
+
+.face-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px; }
+.face-card {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r);
+  overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s;
+}
+.face-card:hover { border-color: var(--line-2); transform: translateY(-2px); }
+.face-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 22px -8px var(--accent); }
+.face-thumb { aspect-ratio: 1; background: var(--bg-2); display: grid; place-items: center; overflow: hidden; }
+.face-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.noimg { color: var(--muted-2); display: grid; place-items: center; }
+.noimg svg { width: 38px; height: 38px; opacity: .5; }
+.face-meta { padding: 8px 10px 4px; }
+.face-meta b { font-size: 12.5px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.face-meta span { font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+.face-card canvas.fp { width: 100%; height: 22px; display: block; opacity: .9; }
+
+.face-detail { position: sticky; top: 0; }
+.detail-thumb {
+  width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--r);
+  border: 1px solid var(--line); margin-bottom: 16px; background: var(--bg-2);
+}
+.detail-thumb.noimg { display: grid; place-items: center; }
+.big-fp {
+  width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--bg-2); image-rendering: pixelated;
+}
+
+/* ============================================================================
+   DUAL BOXES / THUMBBOX / QUEUE / ACTIONS / IMPORT / MODAL / KEYS
+   ============================================================================ */
+.dual { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 720px){ .dual { grid-template-columns: 1fr; } }
+.boxwrap { position: relative; }
+.boxlbl {
+  position: absolute; top: -8px; left: 10px; z-index: 7; padding: 1px 7px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 2px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+}
+.thumbbox { cursor: default; }
+
+/* enroll batch queue */
+.queue { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.qitem { position: relative; width: 56px; height: 56px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.qitem img { width: 100%; height: 100%; object-fit: cover; }
+.qitem button {
+  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; line-height: 14px;
+  background: rgba(8,11,12,.8); color: var(--danger); border: none; border-radius: 2px; cursor: pointer; font-size: 10px;
+}
+
+/* row action buttons (tables) */
+.rowact { white-space: nowrap; text-align: right; }
+.iconbtn {
+  width: 28px; height: 28px; padding: 0; display: inline-grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r);
+  color: var(--muted); cursor: pointer; transition: all .15s; margin-left: 4px;
+}
+.iconbtn svg { width: 15px; height: 15px; }
+.iconbtn:hover { color: var(--accent); border-color: var(--accent); }
+.iconbtn.danger:hover { color: var(--danger); border-color: var(--danger); }
+.btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+
+/* bulk import */
+.layout-hint { font-family: var(--mono); font-size: 12px; color: var(--muted); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; line-height: 1.7; }
+.import-summary { margin-top: 4px; }
+.import-people { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-family: var(--mono); font-size: 10.5px; padding: 3px 9px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--text); background: var(--surface-2); }
+
+/* modal */
+.modal-ov { position: fixed; inset: 0; z-index: 10001; background: rgba(4,6,7,.72); backdrop-filter: blur(3px); display: grid; place-items: center; animation: rise .2s ease both; }
+.modal { width: min(460px, 92vw); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); position: relative; box-shadow: var(--shadow); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.modal-head h3 { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.modal-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; }
+.modal-x:hover { color: var(--danger); }
+.modal-body { padding: 20px; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); }
+
+/* api key reveal */
+.keybox { display: flex; gap: 8px; align-items: center; background: var(--bg-2); border: 1px solid var(--accent-d); border-radius: var(--r); padding: 10px 12px; }
+.keybox code { font-family: var(--mono); font-size: 12px; color: var(--accent); word-break: break-all; flex: 1; }
 
 /* ============================================================================
    TOASTS

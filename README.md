@@ -66,7 +66,14 @@ It is a forensic biometric command console: dark terminal aesthetic, a HUD
 similarity meter, and live audit telemetry.
 
 Views: **Overview** (stats + activity), **Enroll**, **Verify 1:1**,
-**Identify 1:N**, **Persons**, **Bulk Import** (live progress), **Audit Log**.
+**Identify 1:N**, **Persons**, **Face Gallery** (thumbnails + 512-D embedding
+fingerprints), **Bulk Import** (live progress), **Audit Log**.
+
+The **Face Gallery** (`GET /faces`) shows each enrolled face as a card with its
+thumbnail and a heatmap "fingerprint" of the embedding; clicking a card opens
+the full 512-D fingerprint and metadata. A small JPEG crop is stored per face
+(`faces.thumbnail`, populated on enroll/import) — faces enrolled before this
+column existed show a placeholder.
 Navigation is gated by the JWT role (viewer / operator / admin). Log in with an
 operator account; the API endpoint field defaults to the page origin and can be
 pointed at a remote backend. No Node toolchain required — plain HTML/CSS/JS
@@ -88,6 +95,15 @@ docker compose up --build           # runs alembic + uvicorn; postgres has pgvec
 
 # Bootstrap an admin (or set BOOTSTRAP_ADMIN_USER/PASSWORD env before up)
 docker compose exec api python -m scripts.create_admin admin 'StrongPass123'
+
+# dockersiz ishlatish
+sudo apt install postgresql-16-pgvector      # parol so'raydi — shuning uchun men qila olmadim
+sudo systemctl restart postgresql
+
+# .env da portni qaytaring:  POSTGRES_PORT=5432
+docker rm -f fr-pgvector                      # konteynerni o'chirish
+alembic upgrade head                          # lokal PG'da schema + HNSW yaratadi
+python -m scripts.create_admin admin 'StrongPass123'
 ```
 
 Requires the **NVIDIA Container Toolkit** for GPU passthrough.

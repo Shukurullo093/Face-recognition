@@ -36,6 +36,10 @@ const I = {
   check:  '<svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="18" cy="18" r="14"/><path d="m12 18 4 4 8-8"/></svg>',
   cross:  '<svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="18" cy="18" r="14"/><path d="m13 13 10 10M23 13 13 23"/></svg>',
   cam:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="12.5" r="3.4"/></svg>',
+  key:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="4.5"/><path d="M11 11l8 8M16 16l2-2M19 19l2-2"/></svg>',
+  edit:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg>',
+  trash:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg>',
+  swap:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 9h13l-3-3M20 15H7l3 3"/></svg>',
 };
 
 // ---------- nav config ----------
@@ -48,8 +52,12 @@ const NAV = [
   ]},
   { group: 'Data', items: [
     { id: 'persons', label: 'Persons',     icon: 'people', role: 'viewer' },
+    { id: 'gallery', label: 'Face Gallery', icon: 'face',  role: 'viewer' },
     { id: 'import',  label: 'Bulk Import', icon: 'import', role: 'admin' },
     { id: 'logs',    label: 'Audit Log',   icon: 'log',    role: 'viewer' },
+  ]},
+  { group: 'Access', items: [
+    { id: 'apikeys', label: 'API Keys', icon: 'key', role: 'admin' },
   ]},
 ];
 
@@ -97,6 +105,40 @@ function toast(title, msg, kind = 'ok') {
 }
 
 // ============================================================================
+// MODAL — generic overlay; resolves with a value or null (cancel)
+// ============================================================================
+function modal(title, bodyHTML, { okText = 'Save', onMount } = {}) {
+  return new Promise((resolve) => {
+    const ov = el(`
+      <div class="modal-ov">
+        <div class="modal">
+          <div class="brackets"><span></span><span></span><span></span><span></span></div>
+          <div class="modal-head"><h3>${esc(title)}</h3><button class="modal-x" data-x>✕</button></div>
+          <div class="modal-body">${bodyHTML}</div>
+          <div class="modal-foot">
+            <button class="btn ghost" data-cancel>Cancel</button>
+            <button class="btn primary" data-ok>${esc(okText)}</button>
+          </div>
+        </div>
+      </div>`);
+    const close = (val) => { ov.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    ov.querySelector('[data-x]').onclick = () => close(null);
+    ov.querySelector('[data-cancel]').onclick = () => close(null);
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(null); });
+    ov.querySelector('[data-ok]').onclick = () => close(ov.querySelector('.modal-body'));
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(ov);
+    if (onMount) onMount(ov.querySelector('.modal-body'), close);
+  });
+}
+
+function confirmDanger(message) {
+  return modal('Confirm', `<p style="font-family:var(--mono);font-size:13px;line-height:1.6">${esc(message)}</p>`,
+    { okText: 'Delete' }).then((b) => !!b);
+}
+
+// ============================================================================
 // AUTH
 // ============================================================================
 $('#authForm').addEventListener('submit', async (e) => {
@@ -139,7 +181,7 @@ function enterApp() {
   $('#userRole').textContent = S.role;
   $('#userAv').textContent = (S.user || 'A')[0].toUpperCase();
   renderNav();
-  go(can('operator') ? 'overview' : 'overview');
+  go(location.hash.slice(1) || 'overview');   // restore the view from the URL on refresh
   checkSystem();
 }
 
@@ -180,10 +222,16 @@ function releaseCameras() {
   }
 }
 
+function viewRole(id) {
+  for (const g of NAV) for (const it of g.items) if (it.id === id) return it.role;
+  return 'viewer';
+}
+
 function go(id) {
-  if (!VIEWS[id]) id = 'overview';
+  if (!VIEWS[id] || !can(viewRole(id))) id = 'overview';
   releaseCameras();
   S.view = id;
+  if (location.hash.slice(1) !== id) location.hash = id;   // reflect in URL → survives refresh
   document.querySelectorAll('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.view === id));
   const v = VIEWS[id];
   $('#viewTitle').textContent = v.title;
@@ -191,6 +239,12 @@ function go(id) {
   const root = $('#view'); root.innerHTML = '';
   v.render(root);
 }
+
+// Back/forward + manual hash edits.
+window.addEventListener('hashchange', () => {
+  const id = location.hash.slice(1);
+  if (S.token && id && id !== S.view && VIEWS[id]) go(id);
+});
 
 // ============================================================================
 // VIEWFINDER component (signature element)
@@ -330,7 +384,49 @@ function Viewfinder() {
     }
   }
 
-  return { el: wrap, getFile: () => file, scanning, reticle, hasFile: () => !!file };
+  function reset() {
+    stopCamera();
+    file = null; img = null;
+    const im = $('img', wrap); if (im) im.remove();
+    ph.style.display = '';
+    clearBox();
+  }
+
+  return { el: wrap, getFile: () => file, scanning, reticle, reset, hasFile: () => !!file };
+}
+
+// A passive display box (same HUD styling) for reference/comparison images.
+function ThumbBox(title) {
+  const wrap = el(`
+    <div class="viewfinder thumbbox">
+      <span class="vf-corner tl"></span><span class="vf-corner tr"></span>
+      <span class="vf-corner bl"></span><span class="vf-corner br"></span>
+      <div class="scanline"></div>
+      <div class="placeholder">${I.face}<p>${esc(title)}</p></div>
+    </div>`);
+  let timer = null;
+  const imgEl = () => { let im = $('img', wrap); if (!im) { im = el('<img>'); wrap.insertBefore(im, $('.placeholder', wrap)); } return im; };
+
+  function setImage(src) {
+    stop();
+    if (!src) return placeholder(title);
+    imgEl().src = src; $('.placeholder', wrap).style.display = 'none';
+  }
+  function placeholder(text) {
+    stop();
+    const im = $('img', wrap); if (im) im.remove();
+    $('.placeholder p', wrap).textContent = text; $('.placeholder', wrap).style.display = '';
+  }
+  function startCycle(srcs) {
+    stop();
+    if (!srcs || !srcs.length) return;
+    wrap.classList.add('scanning');
+    const im = imgEl(); $('.placeholder', wrap).style.display = 'none';
+    let i = 0;
+    timer = setInterval(() => { im.src = srcs[i % srcs.length]; i++; }, 85);
+  }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } wrap.classList.remove('scanning'); }
+  return { el: wrap, setImage, placeholder, startCycle, stop };
 }
 
 function meter(score, threshold) {
@@ -347,6 +443,28 @@ function meter(score, threshold) {
     </div>`);
   requestAnimationFrame(() => { $('.meter-fill', node).style.width = Math.max(2, Math.min(100, score * 100)) + '%'; });
   return node;
+}
+
+// Render a 512-D embedding as a signed heatmap "fingerprint" onto a canvas.
+// Positive dims -> lime, negative -> cyan; intensity scaled by |value| / max.
+function fingerprint(canvas, emb, cols = 32) {
+  if (!canvas || !emb || !emb.length) return;
+  const ctx = canvas.getContext('2d');
+  const n = emb.length;
+  const rows = Math.ceil(n / cols);
+  const cw = canvas.width / cols;
+  const ch = canvas.height / rows;
+  let max = 0;
+  for (const v of emb) { const a = Math.abs(v); if (a > max) max = a; }
+  max = max || 1;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < n; i++) {
+    const v = emb[i] / max;
+    const c = i % cols, r = (i / cols) | 0;
+    const a = Math.min(1, Math.abs(v) * 1.25 + 0.05);
+    ctx.fillStyle = v >= 0 ? `rgba(182,255,58,${a})` : `rgba(56,214,207,${a})`;
+    ctx.fillRect(c * cw, r * ch, Math.ceil(cw), Math.ceil(ch));
+  }
 }
 
 // shared: load person <option>s
@@ -369,13 +487,14 @@ VIEWS.overview = { title: 'Overview', render: async (root) => {
         <div class="panel-body" id="ovFeed"><div class="empty"><span class="spin"></span></div></div>
       </div>
     </div>`;
-  $('#ovRefresh').addEventListener('click', loadOverview);
+  $('#ovRefresh', root).addEventListener('click', loadOverview);
   loadOverview();
 
   async function loadOverview() {
     try {
       const s = await api('/stats');
-      $('#ovStats').innerHTML = [
+      const stats = $('#ovStats', root); if (!stats) return;   // navigated away
+      stats.innerHTML = [
         ['Registered Persons', s.total_persons, 'identities in gallery', ''],
         ['Enrolled Faces', s.total_faces, 'embedding vectors', 'lime'],
         ['Recognition Events', s.total_events, 'lifetime queries', ''],
@@ -384,8 +503,9 @@ VIEWS.overview = { title: 'Overview', render: async (root) => {
         <div class="stat"><div class="k">${k}</div><div class="v ${cls}">${v}</div><div class="sub">${sub}</div></div>`).join('');
 
       const logs = await api('/logs?limit=12');
-      $('#ovFeed').innerHTML = logs.length ? logsTable(logs) : emptyState('No recognition events yet');
-    } catch (e) { toast('Load failed', e.message, 'err'); $('#ovFeed').innerHTML = emptyState(e.message); }
+      const feed = $('#ovFeed', root); if (!feed) return;
+      feed.innerHTML = logs.length ? logsTable(logs) : emptyState('No recognition events yet');
+    } catch (e) { toast('Load failed', e.message, 'err'); const f = $('#ovFeed', root); if (f) f.innerHTML = emptyState(e.message); }
   }
 }};
 
@@ -394,13 +514,25 @@ VIEWS.overview = { title: 'Overview', render: async (root) => {
 // ============================================================================
 VIEWS.enroll = { title: 'Enroll', render: async (root) => {
   const vf = Viewfinder();
+  const queue = [];  // File[] staged for this person
   root.innerHTML = `<div class="scan-cols stagger"></div>`;
   const cols = $('.scan-cols', root);
 
   const left = el(`<div class="panel"><div class="brackets"><span></span><span></span><span></span><span></span></div>
     <div class="panel-head"><h3>Capture Subject</h3><span class="kicker">SCRFD · ALIGN · ARCFACE</span></div>
     <div class="panel-body"></div></div>`);
-  $('.panel-body', left).appendChild(vf.el);
+  const body = $('.panel-body', left);
+  body.appendChild(vf.el);
+  const tools = el(`<div>
+      <div class="inline" style="margin-top:12px">
+        <button class="btn sm" id="enAdd">+ Add to batch</button>
+        <button class="btn sm ghost" id="enPick">⇪ Add files…</button>
+      </div>
+      <div class="queue" id="enQueue"></div>
+    </div>`);
+  body.appendChild(tools);
+  const multi = el('<input type="file" accept="image/*" multiple style="display:none">');
+  body.appendChild(multi);
   cols.appendChild(left);
 
   const right = el(`<div class="panel pad">
@@ -409,10 +541,25 @@ VIEWS.enroll = { title: 'Enroll', render: async (root) => {
       <div class="inline"><select id="enPerson"><option>loading…</option></select></div></div>
     <div class="form-row"><label>Or register a new identity</label>
       <div class="inline"><input id="enNew" placeholder="Full name (e.g. Jane Doe)"><button class="btn sm" id="enCreate">+ Add</button></div></div>
-    <button class="btn primary block" id="enSubmit" style="margin-top:6px">▸ Generate Embedding & Enroll</button>
-    <div id="enResult" style="margin-top:20px"></div>
+    <button class="btn primary block" id="enSubmit" style="margin-top:6px">▸ Enroll batch</button>
+    <p class="kicker" style="margin-top:10px">Multiple images of one person improve recall — all are enrolled under that identity.</p>
+    <div id="enResult" style="margin-top:18px"></div>
   </div>`);
   cols.appendChild(right);
+
+  function renderQueue() {
+    const q = $('#enQueue', body);
+    q.innerHTML = queue.map((f, i) => `
+      <div class="qitem"><img src="${URL.createObjectURL(f)}"><button data-i="${i}" title="remove">✕</button></div>`).join('');
+    q.querySelectorAll('button').forEach((b) => b.onclick = () => { queue.splice(+b.dataset.i, 1); renderQueue(); });
+    $('#enSubmit', right).textContent = queue.length ? `▸ Enroll batch (${queue.length})` : '▸ Enroll';
+  }
+  $('#enAdd', body).onclick = () => {
+    if (!vf.hasFile()) return toast('No image', 'Capture or choose an image first', 'err');
+    queue.push(vf.getFile()); vf.reset(); renderQueue();
+  };
+  $('#enPick', body).onclick = () => multi.click();
+  multi.onchange = () => { for (const f of multi.files) queue.push(f); multi.value = ''; renderQueue(); };
 
   const sel = $('#enPerson', right);
   try { sel.innerHTML = `<option value="">— select person —</option>` + await personOptions(); }
@@ -430,30 +577,29 @@ VIEWS.enroll = { title: 'Enroll', render: async (root) => {
   });
 
   $('#enSubmit', right).addEventListener('click', async () => {
-    if (!vf.hasFile()) return toast('No image', 'Provide a face image first', 'err');
+    const batch = [...queue];
+    if (vf.hasFile()) batch.push(vf.getFile());
+    if (!batch.length) return toast('No image', 'Add at least one image', 'err');
     if (!sel.value) return toast('No person', 'Select or create a person', 'err');
-    const btn = $('#enSubmit', right); btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Processing';
-    vf.scanning(true); $('#enResult', right).innerHTML = '';
-    try {
-      const fd = new FormData();
-      fd.append('person_id', sel.value); fd.append('image', vf.getFile());
-      const r = await api('/faces/register', { method: 'POST', form: fd });
-      vf.reticle(r.bbox, 'ENROLLED ' + pct(r.confidence), true);
-      $('#enResult', right).innerHTML = `
-        <div class="verdict match">${I.check}<div>Enrolled<small>512-D vector committed to gallery</small></div></div>
-        <div class="readout">
-          ${rdRow('Face ID', shortId(r.face_id))}
-          ${rdRow('Person ID', shortId(r.person_id))}
-          ${rdRow('Detection score', pct(r.confidence))}
-          ${rdRow('Embedding', '512-D · L2-normalised')}
-        </div>`;
-      toast('Enrolled', 'Face committed · ' + pct(r.confidence));
-    } catch (e) {
-      vf.scanning(false);
-      $('#enResult', right).innerHTML = `<div class="verdict nomatch">${I.cross}<div>Failed<small>${esc(e.message)}</small></div></div>`;
-      toast('Enrollment failed', e.message, 'err');
-    } finally { vf.scanning(false); btn.disabled = false; btn.innerHTML = '▸ Generate Embedding & Enroll'; }
+    const btn = $('#enSubmit', right); btn.disabled = true;
+    let ok = 0, fail = 0; const errs = [];
+    for (let i = 0; i < batch.length; i++) {
+      btn.innerHTML = `<span class="spin"></span> ${i + 1}/${batch.length}`;
+      try {
+        const fd = new FormData(); fd.append('person_id', sel.value); fd.append('image', batch[i]);
+        await api('/faces/register', { method: 'POST', form: fd });
+        ok++;
+      } catch (e) { fail++; errs.push(e.message); }
+    }
+    queue.length = 0; vf.reset(); renderQueue();
+    $('#enResult', right).innerHTML = `
+      <div class="verdict ${fail && !ok ? 'nomatch' : 'match'}">${fail && !ok ? I.cross : I.check}
+        <div>Enrolled ${ok}/${batch.length}<small>${fail ? fail + ' failed' : '512-D vectors committed'}</small></div></div>
+      ${errs.length ? `<div class="readout">${errs.slice(0, 5).map((e, i) => rdRow('Error ' + (i + 1), esc(e))).join('')}</div>` : ''}`;
+    toast('Enroll done', `${ok} ok · ${fail} failed`, fail && !ok ? 'err' : 'ok');
+    btn.disabled = false; renderQueue();
   });
+  renderQueue();
 }};
 
 // ============================================================================
@@ -461,12 +607,18 @@ VIEWS.enroll = { title: 'Enroll', render: async (root) => {
 // ============================================================================
 VIEWS.verify = { title: 'Verify 1:1', render: async (root) => {
   const vf = Viewfinder();
+  const ref = ThumbBox('Selected identity');
   root.innerHTML = `<div class="scan-cols stagger"></div>`;
   const cols = $('.scan-cols', root);
   const left = el(`<div class="panel"><div class="brackets"><span></span><span></span><span></span><span></span></div>
-    <div class="panel-head"><h3>Probe Image</h3><span class="kicker">1:1 VERIFICATION</span></div>
-    <div class="panel-body"></div></div>`);
-  $('.panel-body', left).appendChild(vf.el); cols.appendChild(left);
+    <div class="panel-head"><h3>1:1 Verification</h3><span class="kicker">PROBE vs ENROLLED</span></div>
+    <div class="panel-body"><div class="dual">
+      <div class="boxwrap"><span class="boxlbl">Probe image</span></div>
+      <div class="boxwrap"><span class="boxlbl">Enrolled reference</span></div>
+    </div></div></div>`);
+  const wraps = left.querySelectorAll('.boxwrap');
+  wraps[0].appendChild(vf.el); wraps[1].appendChild(ref.el);
+  cols.appendChild(left);
 
   const right = el(`<div class="panel pad"><div class="brackets"><span></span><span></span><span></span><span></span></div>
     <div class="form-row"><label>Claimed Identity</label><select id="vPerson"><option>loading…</option></select></div>
@@ -478,6 +630,16 @@ VIEWS.verify = { title: 'Verify 1:1', render: async (root) => {
   const sel = $('#vPerson', right);
   try { sel.innerHTML = `<option value="">— select person —</option>` + await personOptions(); }
   catch (e) { sel.innerHTML = `<option value="">${esc(e.message)}</option>`; }
+
+  sel.addEventListener('change', async () => {
+    if (!sel.value) return ref.placeholder('Selected identity');
+    ref.placeholder('loading…');
+    try {
+      const faces = await api(`/faces?person_id=${sel.value}&limit=1`);
+      if (faces.length && faces[0].thumbnail) ref.setImage(faces[0].thumbnail);
+      else ref.placeholder('No enrolled image');
+    } catch { ref.placeholder('—'); }
+  });
 
   $('#vSubmit', right).addEventListener('click', async () => {
     if (!vf.hasFile()) return toast('No image', 'Provide a probe image', 'err');
@@ -508,14 +670,20 @@ VIEWS.verify = { title: 'Verify 1:1', render: async (root) => {
 // ============================================================================
 // VIEW: SEARCH (1:N)
 // ============================================================================
-VIEWS.search = { title: 'Identify 1:N', render: (root) => {
+VIEWS.search = { title: 'Identify 1:N', render: async (root) => {
   const vf = Viewfinder();
+  const scan = ThumbBox('Gallery');
   root.innerHTML = `<div class="scan-cols stagger"></div>`;
   const cols = $('.scan-cols', root);
   const left = el(`<div class="panel"><div class="brackets"><span></span><span></span><span></span><span></span></div>
-    <div class="panel-head"><h3>Unknown Subject</h3><span class="kicker">1:N · HNSW COSINE</span></div>
-    <div class="panel-body"></div></div>`);
-  $('.panel-body', left).appendChild(vf.el); cols.appendChild(left);
+    <div class="panel-head"><h3>1:N Identification</h3><span class="kicker">HNSW · COSINE</span></div>
+    <div class="panel-body"><div class="dual">
+      <div class="boxwrap"><span class="boxlbl">Query image</span></div>
+      <div class="boxwrap"><span class="boxlbl">Gallery scan</span></div>
+    </div></div></div>`);
+  const wraps = left.querySelectorAll('.boxwrap');
+  wraps[0].appendChild(vf.el); wraps[1].appendChild(scan.el);
+  cols.appendChild(left);
 
   const right = el(`<div class="panel pad"><div class="brackets"><span></span><span></span><span></span><span></span></div>
     <div class="form-row"><label>Candidates (top K)</label><input id="sK" type="number" min="1" max="100" value="10"></div>
@@ -524,18 +692,31 @@ VIEWS.search = { title: 'Identify 1:N', render: (root) => {
   </div>`);
   cols.appendChild(right);
 
+  // Preload gallery thumbnails for the "flip-through-the-database" animation.
+  let gallery = [];
+  try { gallery = await api('/faces?limit=60'); } catch { /* ignore */ }
+  const thumbs = gallery.map((f) => f.thumbnail).filter(Boolean);
+  scan.placeholder(thumbs.length ? `${thumbs.length} faces in gallery` : 'Gallery empty');
+
   $('#sSubmit', right).addEventListener('click', async () => {
     if (!vf.hasFile()) return toast('No image', 'Provide a query image', 'err');
     const btn = $('#sSubmit', right); btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Searching';
     vf.scanning(true); $('#sResult', right).innerHTML = '';
+    scan.startCycle(thumbs);                                   // rapid one-by-one comparison animation
+    const minAnim = new Promise((res) => setTimeout(res, 1100));  // let the scan be visible
     try {
       const k = Math.max(1, Math.min(100, +$('#sK', right).value || 10));
       const fd = new FormData(); fd.append('image', vf.getFile());
-      const r = await api('/faces/search?top_k=' + k, { method: 'POST', form: fd });
+      const [r] = await Promise.all([api('/faces/search?top_k=' + k, { method: 'POST', form: fd }), minAnim]);
+      scan.stop();
       if (!r.matches.length) {
+        scan.placeholder('No match');
         $('#sResult', right).innerHTML = `<div class="verdict nomatch">${I.cross}<div>No Candidates<small>above threshold ${r.threshold}</small></div></div>`;
       } else {
         const best = r.matches[0];
+        // settle the scan box on the matched face's thumbnail
+        const hit = gallery.find((f) => f.id === best.face_id) || gallery.find((f) => f.person_id === best.person_id);
+        if (hit && hit.thumbnail) scan.setImage(hit.thumbnail); else scan.placeholder(best.full_name);
         const list = r.matches.map((m, i) => `
           <div class="match ${i === 0 ? 'top' : ''}">
             <div class="rank">${String(i + 1).padStart(2, '0')}</div>
@@ -546,8 +727,6 @@ VIEWS.search = { title: 'Identify 1:N', render: (root) => {
         $('#sResult', right).innerHTML = `
           <div class="verdict match">${I.check}<div>${esc(best.full_name)}<small>best match · ${pct(best.similarity_score)} confidence</small></div></div>
           <div class="match-list" style="margin-top:6px">${list}</div>`;
-        // Scope to .match-list so the "verdict match" header (which also carries
-        // the .match class for styling) is excluded and indices stay aligned.
         requestAnimationFrame(() => $('#sResult', right).querySelectorAll('.match-list .match').forEach((m, i) => {
           const f = m.querySelector('.f');
           if (f) f.style.width = Math.min(100, r.matches[i].similarity_score * 100) + '%';
@@ -555,6 +734,7 @@ VIEWS.search = { title: 'Identify 1:N', render: (root) => {
       }
       toast('Search complete', `${r.matches.length} candidate(s)`, r.matches.length ? 'ok' : 'err');
     } catch (e) {
+      scan.stop(); scan.placeholder('Error');
       $('#sResult', right).innerHTML = `<div class="verdict nomatch">${I.cross}<div>Error<small>${esc(e.message)}</small></div></div>`;
       toast('Search failed', e.message, 'err');
     } finally { vf.scanning(false); btn.disabled = false; btn.innerHTML = '▸ Search Gallery'; }
@@ -583,28 +763,163 @@ VIEWS.persons = { title: 'Persons', render: async (root) => {
   loadPersons();
 
   async function addPerson() {
-    const full_name = $('#pName').value.trim();
+    const full_name = $('#pName', root).value.trim();
     if (!full_name) return toast('Missing name', 'Enter a full name', 'err');
-    const external_id = $('#pExt').value.trim() || null;
+    const external_id = $('#pExt', root).value.trim() || null;
     try {
       await api('/persons', { method: 'POST', body: { full_name, external_id } });
-      $('#pName').value = ''; $('#pExt').value = '';
+      $('#pName', root).value = ''; $('#pExt', root).value = '';
       toast('Registered', full_name); loadPersons();
     } catch (e) { toast('Failed', e.message, 'err'); }
   }
+  const canEdit = can('operator');
   async function loadPersons() {
     try {
       const ppl = await api('/persons?limit=200');
-      $('#pList').innerHTML = ppl.length ? `
-        <table class="table"><thead><tr><th>Name</th><th>External ID</th><th>ID</th><th>Status</th><th>Created</th></tr></thead>
-        <tbody>${ppl.map((p) => `<tr>
+      const list = $('#pList', root); if (!list) return;   // navigated away
+      if (!ppl.length) { list.innerHTML = emptyState('No persons registered'); return; }
+      list.innerHTML = `
+        <table class="table"><thead><tr><th>Name</th><th>External ID</th><th>ID</th><th>Status</th><th>Created</th>${canEdit ? '<th></th>' : ''}</tr></thead>
+        <tbody>${ppl.map((p) => `<tr data-id="${p.id}">
           <td style="font-family:var(--sans);font-weight:600">${esc(p.full_name)}</td>
           <td class="idcell">${esc(p.external_id || '—')}</td>
           <td class="idcell">${shortId(p.id)}</td>
           <td><span class="tag ${p.is_active ? 'ok' : 'fail'}">${p.is_active ? 'active' : 'inactive'}</span></td>
-          <td class="idcell">${fmtDate(p.created_at)}</td></tr>`).join('')}</tbody></table>`
-        : emptyState('No persons registered');
-    } catch (e) { $('#pList').innerHTML = emptyState(e.message); }
+          <td class="idcell">${fmtDate(p.created_at)}</td>
+          ${canEdit ? `<td class="rowact">
+            <button class="iconbtn" data-edit title="Edit">${I.edit}</button>
+            <button class="iconbtn danger" data-del title="Delete">${I.trash}</button></td>` : ''}
+        </tr>`).join('')}</tbody></table>`;
+      if (canEdit) ppl.forEach((p) => {
+        const tr = $(`tr[data-id="${p.id}"]`, list);
+        if (!tr) return;
+        tr.querySelector('[data-edit]').onclick = () => editPerson(p);
+        tr.querySelector('[data-del]').onclick = () => delPerson(p);
+      });
+    } catch (e) { const l = $('#pList', root); if (l) l.innerHTML = emptyState(e.message); }
+  }
+
+  async function editPerson(p) {
+    const body = await modal('Edit Person', `
+      <div class="form-row"><label>Full name</label><input id="mName" value="${esc(p.full_name)}"></div>
+      <div class="form-row"><label>External ID</label><input id="mExt" value="${esc(p.external_id || '')}"></div>
+      <div class="form-row"><label>Status</label>
+        <select id="mActive"><option value="true"${p.is_active ? ' selected' : ''}>active</option>
+          <option value="false"${!p.is_active ? ' selected' : ''}>inactive</option></select></div>`);
+    if (!body) return;
+    try {
+      await api(`/persons/${p.id}`, { method: 'PATCH', body: {
+        full_name: $('#mName', body).value.trim(),
+        external_id: $('#mExt', body).value.trim() || null,
+        is_active: $('#mActive', body).value === 'true',
+      }});
+      toast('Saved', p.full_name); loadPersons();
+    } catch (e) { toast('Update failed', e.message, 'err'); }
+  }
+
+  async function delPerson(p) {
+    if (!await confirmDanger(`Delete "${p.full_name}" and ALL their enrolled faces? This cannot be undone.`)) return;
+    try { await api(`/persons/${p.id}`, { method: 'DELETE' }); toast('Deleted', p.full_name); loadPersons(); }
+    catch (e) { toast('Delete failed', e.message, 'err'); }
+  }
+}};
+
+// ============================================================================
+// VIEW: FACE GALLERY (thumbnails + embedding fingerprints)
+// ============================================================================
+VIEWS.gallery = { title: 'Face Gallery', render: async (root) => {
+  root.innerHTML = `
+    <div class="gallery-cols stagger">
+      <div class="panel">
+        <div class="brackets"><span></span><span></span><span></span><span></span></div>
+        <div class="panel-head"><h3>Enrolled Faces</h3><button class="btn sm ghost" id="gRefresh">↻ Refresh</button></div>
+        <div class="panel-body" id="gGrid"><div class="empty"><span class="spin"></span></div></div>
+      </div>
+      <div class="panel pad face-detail" id="gDetail">
+        <div class="brackets"><span></span><span></span><span></span><span></span></div>
+        <div class="empty">${I.face}<p>Select a face to inspect its 512-D embedding</p></div>
+      </div>
+    </div>`;
+  $('#gRefresh', root).addEventListener('click', load);
+  let faces = [];
+  await load();
+
+  async function load() {
+    const grid = $('#gGrid', root);
+    grid.innerHTML = `<div class="empty"><span class="spin"></span></div>`;
+    try {
+      faces = await api('/faces?limit=60');
+    } catch (e) { grid.innerHTML = emptyState(e.message); return; }
+    if (!faces.length) { grid.innerHTML = emptyState('No faces enrolled yet'); return; }
+
+    grid.innerHTML = `<div class="face-grid">` + faces.map((f) => `
+      <div class="face-card" data-id="${f.id}">
+        <div class="face-thumb">${f.thumbnail
+          ? `<img src="${f.thumbnail}" alt="">`
+          : `<span class="noimg">${I.face}</span>`}</div>
+        <div class="face-meta">
+          <b>${esc(f.full_name)}</b>
+          <span>${pct(f.det_score)} · ${fmtDate(f.created_at)}</span>
+        </div>
+        <canvas class="fp" width="240" height="30"></canvas>
+      </div>`).join('') + `</div>`;
+
+    faces.forEach((f) => {
+      const cardEl = grid.querySelector(`.face-card[data-id="${f.id}"]`);
+      fingerprint(cardEl.querySelector('canvas.fp'), f.embedding, 64);
+      cardEl.addEventListener('click', () => showDetail(f, cardEl));
+    });
+  }
+
+  const canEdit = can('operator');
+  const replaceInput = el('<input type="file" accept="image/*" style="display:none">');
+  root.appendChild(replaceInput);
+  let replaceTarget = null;
+  replaceInput.onchange = async () => {
+    const file = replaceInput.files[0]; replaceInput.value = '';
+    if (!file || !replaceTarget) return;
+    try {
+      const fd = new FormData(); fd.append('image', file);
+      await api(`/faces/${replaceTarget}/image`, { method: 'PUT', form: fd });
+      toast('Image replaced', 're-embedded'); await load();
+      const f = faces.find((x) => x.id === replaceTarget);
+      if (f) showDetail(f, $(`.face-card[data-id="${f.id}"]`, root));
+    } catch (e) { toast('Replace failed', e.message, 'err'); }
+  };
+
+  function showDetail(f, cardEl) {
+    root.querySelectorAll('.face-card').forEach((c) => c.classList.toggle('active', c === cardEl));
+    const detail = $('#gDetail', root);
+    detail.innerHTML = `
+      <div class="brackets"><span></span><span></span><span></span><span></span></div>
+      ${f.thumbnail ? `<img class="detail-thumb" src="${f.thumbnail}" alt="">`
+        : `<div class="detail-thumb noimg">${I.face}</div>`}
+      <p class="kicker" style="margin-bottom:8px">EMBEDDING FINGERPRINT · 512-D</p>
+      <canvas class="big-fp" width="320" height="160"></canvas>
+      <div class="readout" style="margin-top:14px">
+        ${rdRow('Person', esc(f.full_name))}
+        ${rdRow('Face ID', shortId(f.id))}
+        ${rdRow('Person ID', shortId(f.person_id))}
+        ${rdRow('Detection score', pct(f.det_score))}
+        ${rdRow('Vector', `${f.embedding_dim}-D · ‖v‖=${f.embedding_norm}`)}
+        ${rdRow('Source', esc(f.image_path || '—'))}
+        ${rdRow('Enrolled', fmtDate(f.created_at, true))}
+      </div>
+      ${canEdit ? `<div class="inline" style="margin-top:16px">
+        <button class="btn sm" data-replace>${I.swap} Replace image</button>
+        <button class="btn sm ghost danger" data-del>${I.trash} Delete</button></div>` : ''}`;
+    fingerprint($('.big-fp', detail), f.embedding, 32);
+    if (canEdit) {
+      detail.querySelector('[data-replace]').onclick = () => { replaceTarget = f.id; replaceInput.click(); };
+      detail.querySelector('[data-del]').onclick = async () => {
+        if (!await confirmDanger(`Delete this face of "${f.full_name}"? The embedding is removed from search.`)) return;
+        try {
+          await api(`/faces/${f.id}`, { method: 'DELETE' });
+          toast('Face deleted', f.full_name); await load();
+          $('#gDetail', root).innerHTML = `<div class="brackets"><span></span><span></span><span></span><span></span></div><div class="empty">${I.face}<p>Select a face to inspect its 512-D embedding</p></div>`;
+        } catch (e) { toast('Delete failed', e.message, 'err'); }
+      };
+    }
   }
 }};
 
@@ -613,61 +928,84 @@ VIEWS.persons = { title: 'Persons', render: async (root) => {
 // ============================================================================
 VIEWS.import = { title: 'Bulk Import', render: (root) => {
   root.innerHTML = `
-    <div class="view-grid stagger" style="max-width:760px">
+    <div class="view-grid stagger" style="max-width:820px">
       <div class="panel pad"><div class="brackets"><span></span><span></span><span></span><span></span></div>
-        <p class="kicker" style="margin-bottom:14px">FOLDER LAYOUT</p>
-        <pre style="font-family:var(--mono);font-size:12px;color:var(--muted);background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:14px;line-height:1.7">&lt;root&gt;/
-  Jane_Doe/   img1.jpg  img2.jpg
-  John_Roe/   photo.png</pre>
-        <div class="form-row" style="margin-top:16px"><label>Server-side root path</label>
-          <input id="impPath" placeholder="/data/gallery"></div>
-        <button class="btn primary block" id="impStart">▸ Launch Import Job</button>
+        <p class="kicker" style="margin-bottom:12px">PICK A FOLDER ON YOUR COMPUTER</p>
+        <pre class="layout-hint">chosen-folder/
+  Jane Doe/    img1.jpg  img2.jpg
+  John Roe/    photo.png</pre>
+        <p class="kicker" style="margin:12px 0">Each sub-folder name becomes a person; every image in it is enrolled under that identity.</p>
+        <div class="inline" style="margin-top:6px">
+          <button class="btn" id="impPick">📁 Choose folder…</button>
+          <button class="btn primary" id="impStart" disabled>▸ Import</button>
+        </div>
+        <div id="impSummary" class="import-summary"></div>
+        <input type="file" id="impFiles" webkitdirectory directory multiple style="display:none">
       </div>
       <div class="panel pad" id="impPanel" style="display:none"><div class="brackets"><span></span><span></span><span></span><span></span></div>
-        <div class="panel-head" style="padding:0 0 14px;border-bottom:1px solid var(--line)"><h3>Job Telemetry</h3><span class="tag amber" id="impState">pending</span></div>
+        <div class="panel-head" style="padding:0 0 14px;border-bottom:1px solid var(--line)"><h3>Import Progress</h3><span class="tag amber" id="impState">pending</span></div>
         <div class="progress" style="margin:18px 0"><div class="f" id="impFill"></div><div class="t" id="impTxt">0%</div></div>
         <div class="readout">
-          ${rdRow('Job ID', '<span id="impId">—</span>')}
           ${rdRow('Processed', '<span id="impProc">0 / 0</span>')}
           ${rdRow('Succeeded', '<span id="impOk" class="accent">0</span>')}
           ${rdRow('Failed', '<span id="impFail" class="danger">0</span>')}
+          ${rdRow('Persons', '<span id="impPersons">0</span>')}
         </div>
         <div id="impErrors" style="margin-top:12px"></div>
       </div>
     </div>`;
 
-  let poll = null;
-  $('#impStart').addEventListener('click', async () => {
-    const root_path = $('#impPath').value.trim();
-    if (!root_path) return toast('Missing path', 'Enter the server-side root path', 'err');
-    try {
-      const job = await api('/faces/import', { method: 'POST', body: { root_path } });
-      $('#impPanel').style.display = 'block';
-      $('#impId').textContent = shortId(job.job_id);
-      toast('Import started', 'Polling job ' + shortId(job.job_id));
-      clearInterval(poll);
-      poll = setInterval(() => pollJob(job.job_id), 1000);
-      pollJob(job.job_id);
-    } catch (e) { toast('Launch failed', e.message, 'err'); }
-  });
+  const IMG_RE = /\.(jpe?g|png|webp|bmp)$/i;
+  let items = [];   // [{personName, file}]
 
-  async function pollJob(id) {
-    try {
-      const j = await api('/faces/import/' + id);
-      const p = j.total ? Math.round((j.processed / j.total) * 100) : (j.state === 'completed' ? 100 : 0);
-      $('#impFill').style.width = p + '%'; $('#impTxt').textContent = p + '%';
-      $('#impProc').textContent = `${j.processed} / ${j.total}`;
-      $('#impOk').textContent = j.succeeded; $('#impFail').textContent = j.failed;
-      const st = $('#impState'); st.textContent = j.state;
-      st.className = 'tag ' + ({ completed: 'ok', failed: 'fail', running: 'reg', pending: 'amber' }[j.state] || 'amber');
-      if (j.errors?.length) $('#impErrors').innerHTML = `<p class="kicker" style="margin-bottom:6px;color:var(--danger)">ERRORS (${j.errors.length})</p>` +
-        j.errors.slice(0, 8).map((e) => `<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:2px 0">› ${esc(e)}</div>`).join('');
-      if (j.state === 'completed' || j.state === 'failed') {
-        clearInterval(poll);
-        toast('Import ' + j.state, `${j.succeeded} ok · ${j.failed} failed`, j.state === 'completed' ? 'ok' : 'err');
-      }
-    } catch (e) { clearInterval(poll); toast('Poll failed', e.message, 'err'); }
-  }
+  $('#impPick').onclick = () => $('#impFiles', root).click();
+  $('#impFiles', root).onchange = (e) => {
+    const files = [...e.target.files].filter((f) => IMG_RE.test(f.name));
+    items = files.map((f) => {
+      const parts = (f.webkitRelativePath || f.name).split('/');
+      const person = parts.length >= 2 ? parts[parts.length - 2] : 'Imported';
+      return { personName: person.replace(/[_]+/g, ' ').trim() || 'Imported', file: f };
+    });
+    const byPerson = {};
+    items.forEach((it) => { byPerson[it.personName] = (byPerson[it.personName] || 0) + 1; });
+    const persons = Object.keys(byPerson);
+    $('#impSummary', root).innerHTML = items.length
+      ? `<p class="kicker" style="margin:14px 0 8px">${items.length} image(s) · ${persons.length} person(s)</p>`
+        + `<div class="import-people">${persons.slice(0, 40).map((p) => `<span class="chip">${esc(p)} · ${byPerson[p]}</span>`).join('')}${persons.length > 40 ? `<span class="chip">+${persons.length - 40} more</span>` : ''}</div>`
+      : `<p class="kicker" style="margin-top:14px;color:var(--danger)">No images found in that folder</p>`;
+    $('#impStart', root).disabled = !items.length;
+  };
+
+  $('#impStart', root).onclick = async () => {
+    if (!items.length) return;
+    const btn = $('#impStart', root); btn.disabled = true;
+    $('#impPick', root).disabled = true;
+    $('#impPanel', root).style.display = 'block';
+    const total = items.length; let processed = 0, ok = 0, fail = 0; const errs = [];
+    const persons = new Set();
+    for (const it of items) {
+      try {
+        const fd = new FormData();
+        fd.append('person_name', it.personName);
+        fd.append('image', it.file, it.file.name);
+        await api('/faces/enroll', { method: 'POST', form: fd });
+        ok++; persons.add(it.personName);
+      } catch (e) { fail++; if (errs.length < 50) errs.push(`${it.personName}/${it.file.name}: ${e.message}`); }
+      processed++;
+      const p = Math.round((processed / total) * 100);
+      $('#impFill', root).style.width = p + '%'; $('#impTxt', root).textContent = p + '%';
+      $('#impProc', root).textContent = `${processed} / ${total}`;
+      $('#impOk', root).textContent = ok; $('#impFail', root).textContent = fail;
+      $('#impPersons', root).textContent = persons.size;
+      const st = $('#impState', root); st.textContent = 'running'; st.className = 'tag reg';
+      if (errs.length) $('#impErrors', root).innerHTML = `<p class="kicker" style="margin-bottom:6px;color:var(--danger)">ERRORS (${fail})</p>`
+        + errs.slice(0, 8).map((x) => `<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:2px 0">› ${esc(x)}</div>`).join('');
+    }
+    const st = $('#impState', root); st.textContent = fail && !ok ? 'failed' : 'completed';
+    st.className = 'tag ' + (fail && !ok ? 'fail' : 'ok');
+    toast('Import ' + st.textContent, `${ok} ok · ${fail} failed`, fail && !ok ? 'err' : 'ok');
+    $('#impPick', root).disabled = false;
+  };
 }};
 
 // ============================================================================
@@ -682,14 +1020,83 @@ VIEWS.logs = { title: 'Audit Log', render: async (root) => {
           <button class="btn sm ghost" id="lgRefresh">↻ Refresh</button></div></div>
       <div class="panel-body" id="lgBody"><div class="empty"><span class="spin"></span></div></div>
     </div>`;
-  $('#lgRefresh').addEventListener('click', loadLogs);
-  $('#lgLimit').addEventListener('change', loadLogs);
+  $('#lgRefresh', root).addEventListener('click', loadLogs);
+  $('#lgLimit', root).addEventListener('change', loadLogs);
   loadLogs();
   async function loadLogs() {
     try {
-      const logs = await api('/logs?limit=' + ($('#lgLimit').value || 50));
-      $('#lgBody').innerHTML = logs.length ? logsTable(logs) : emptyState('No events recorded');
-    } catch (e) { $('#lgBody').innerHTML = emptyState(e.message); }
+      const sel = $('#lgLimit', root);
+      const logs = await api('/logs?limit=' + ((sel && sel.value) || 50));
+      const body = $('#lgBody', root); if (!body) return;
+      body.innerHTML = logs.length ? logsTable(logs) : emptyState('No events recorded');
+    } catch (e) { const b = $('#lgBody', root); if (b) b.innerHTML = emptyState(e.message); }
+  }
+}};
+
+// ============================================================================
+// VIEW: API KEYS (admin) — 3rd-party 1:N access
+// ============================================================================
+VIEWS.apikeys = { title: 'API Keys', render: async (root) => {
+  root.innerHTML = `
+    <div class="view-grid stagger" style="max-width:900px">
+      <div class="panel pad"><div class="brackets"><span></span><span></span><span></span><span></span></div>
+        <p class="kicker" style="margin-bottom:10px">3RD-PARTY 1:N IDENTIFICATION</p>
+        <div class="inline">
+          <input id="akName" placeholder="Key name (e.g. partner-acme)">
+          <button class="btn primary" id="akAdd">+ Generate Key</button>
+        </div>
+        <p class="kicker" style="margin-top:10px">POST multipart <span class="mono accent">/api/v1/external/search</span> with header <span class="mono accent">X-API-Key</span> → returns the top-1 match (or none). Rate-limited per key.</p>
+      </div>
+      <div class="panel"><div class="brackets"><span></span><span></span><span></span><span></span></div>
+        <div class="panel-head"><h3>Keys</h3><button class="btn sm ghost" id="akRefresh">↻</button></div>
+        <div class="panel-body" id="akList"><div class="empty"><span class="spin"></span></div></div>
+      </div>
+    </div>`;
+  $('#akAdd', root).onclick = addKey;
+  $('#akRefresh', root).onclick = load;
+  await load();
+
+  async function load() {
+    try {
+      const keys = await api('/api-keys');
+      if (!keys.length) { $('#akList', root).innerHTML = emptyState('No API keys yet'); return; }
+      $('#akList', root).innerHTML = `
+        <table class="table"><thead><tr><th>Name</th><th>Prefix</th><th>Status</th><th>Last used</th><th>Created</th><th></th></tr></thead>
+        <tbody>${keys.map((k) => `<tr data-id="${k.id}">
+          <td style="font-family:var(--sans);font-weight:600">${esc(k.name)}</td>
+          <td class="idcell">${esc(k.prefix)}…</td>
+          <td><span class="tag ${k.is_active ? 'ok' : 'fail'}">${k.is_active ? 'active' : 'revoked'}</span></td>
+          <td class="idcell">${k.last_used_at ? fmtDate(k.last_used_at, true) : 'never'}</td>
+          <td class="idcell">${fmtDate(k.created_at)}</td>
+          <td class="rowact"><button class="iconbtn danger" data-del title="Revoke">${I.trash}</button></td>
+        </tr>`).join('')}</tbody></table>`;
+      keys.forEach((k) => {
+        $(`tr[data-id="${k.id}"] [data-del]`, $('#akList', root)).onclick = async () => {
+          if (!await confirmDanger(`Revoke API key "${k.name}"? Callers using it will be denied immediately.`)) return;
+          try { await api(`/api-keys/${k.id}`, { method: 'DELETE' }); toast('Revoked', k.name); load(); }
+          catch (e) { toast('Revoke failed', e.message, 'err'); }
+        };
+      });
+    } catch (e) { $('#akList', root).innerHTML = emptyState(e.message); }
+  }
+
+  async function addKey() {
+    const name = $('#akName', root).value.trim();
+    if (!name) return toast('Missing name', 'Name the key first', 'err');
+    try {
+      const k = await api('/api-keys', { method: 'POST', body: { name } });
+      $('#akName', root).value = '';
+      await modal('API Key Created', `
+        <p class="kicker" style="margin-bottom:8px;color:var(--accent)">COPY NOW — SHOWN ONLY ONCE</p>
+        <div class="keybox"><code id="rawkey">${esc(k.key)}</code><button class="btn sm" id="copyKey">Copy</button></div>
+        <p class="kicker" style="margin-top:10px">Use as header: <span class="mono">X-API-Key: ${esc(k.prefix)}…</span></p>`,
+        { okText: 'Done', onMount: (body) => {
+          body.querySelector('#copyKey').onclick = () => {
+            navigator.clipboard?.writeText(k.key).then(() => toast('Copied', 'API key in clipboard')).catch(() => {});
+          };
+        }});
+      toast('Key created', k.name); load();
+    } catch (e) { toast('Create failed', e.message, 'err'); }
   }
 }};
 

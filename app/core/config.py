@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     RATE_LIMIT: str = "100/minute"
+    EXTERNAL_RATE_LIMIT: str = "60/minute"   # per-API-key limit for /external/search
 
     # ---- Recognition models ----
     # Relative paths resolve from the working dir (project root locally, /app in

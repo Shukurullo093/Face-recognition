@@ -27,6 +27,22 @@ class FaceRead(ORMModel):
     created_at: datetime
 
 
+class FaceGalleryItem(BaseModel):
+    """One face for the dashboard gallery: thumbnail + full embedding vector."""
+
+    id: uuid.UUID
+    person_id: uuid.UUID
+    full_name: str
+    det_score: float
+    quality: float | None
+    image_path: str | None
+    created_at: datetime
+    thumbnail: str | None = Field(default=None, description="data:image/jpeg;base64 URI or null")
+    embedding: list[float] = Field(description="512-D L2-normalised vector")
+    embedding_dim: int
+    embedding_norm: float
+
+
 # ---- Verification (1:1) ----
 class VerifyResponse(BaseModel):
     matched: bool

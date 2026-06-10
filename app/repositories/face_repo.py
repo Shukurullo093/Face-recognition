@@ -32,6 +32,26 @@ class FaceRepository(BaseRepository[Face]):
         result = await self.session.scalars(stmt)
         return list(result.all())
 
+    async def list_with_person(
+        self, limit: int = 24, offset: int = 0, person_id: uuid.UUID | None = None
+    ) -> list[tuple[Face, str]]:
+        """Faces joined to their person's name, newest first (gallery view).
+
+        Optionally filtered to a single person (used by Verify to show the
+        claimed identity's enrolled image).
+        """
+        stmt = (
+            select(Face, Person.full_name)
+            .join(Person, Person.id == Face.person_id)
+            .order_by(Face.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        if person_id is not None:
+            stmt = stmt.where(Face.person_id == person_id)
+        rows = await self.session.execute(stmt)
+        return [(row[0], row[1]) for row in rows.all()]
+
     async def search(
         self, embedding: list[float], top_k: int, only_active: bool = True
     ) -> list[SearchRow]:
