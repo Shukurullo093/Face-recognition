@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SENTINEL · Biometric Console</title>
+  <link rel="stylesheet" href="styles.css?v=2" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='4' fill='%23080b0c'/%3E%3Cpath d='M5 8V5h3M19 8V5h-3M5 16v3h3M19 16v3h-3' stroke='%23b6ff3a' stroke-width='1.6' fill='none'/%3E%3Ccircle cx='12' cy='12' r='3.2' stroke='%23b6ff3a' stroke-width='1.4' fill='none'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+  <!-- ============ SVG glyph defs (reused) ============ -->
+  <svg width="0" height="0" style="position:absolute">
+    <defs>
+      <symbol id="sentinel" viewBox="0 0 40 40">
+        <rect x="1" y="1" width="38" height="38" rx="6" fill="none" stroke="#b6ff3a" stroke-opacity=".25"/>
+        <path d="M8 13V8h5M32 13V8h-5M8 27v5h5M32 27v5h-5" stroke="#b6ff3a" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        <circle cx="20" cy="20" r="5.5" stroke="#b6ff3a" stroke-width="1.6" fill="none"/>
+        <circle cx="20" cy="20" r="1.6" fill="#b6ff3a"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- ============ LOGIN ============ -->
+  <div class="auth" id="auth">
+    <form class="auth-card" id="authForm">
+      <div class="brackets"><span></span><span></span><span></span><span></span></div>
+      <div class="auth-logo">
+        <svg class="glyph"><use href="#sentinel"/></svg>
+        <div>
+          <h1>SENTINEL</h1>
+          <p>Biometric Identification Console</p>
+        </div>
+      </div>
+      <div class="auth-error" id="authError"></div>
+      <div class="field">
+        <label>Operator ID</label>
+        <input id="loginUser" autocomplete="username" placeholder="admin" required />
+      </div>
+      <div class="field">
+        <label>Passphrase</label>
+        <input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••" required />
+      </div>
+      <div class="field">
+        <label>API Endpoint</label>
+        <input id="loginApi" placeholder="http://localhost:8000/api/v1" />
+      </div>
+      <button class="btn primary block" id="loginBtn" type="submit">Authenticate ▸</button>
+      <div class="auth-foot">
+        <span>SCRFD · ARCFACE-R100</span>
+        <span id="authStatus">● SECURE CHANNEL</span>
+      </div>
+    </form>
+  </div>
+
+  <!-- ============ APP SHELL ============ -->
+  <div class="app" id="app">
+    <!-- sidebar -->
+    <aside class="sidebar">
+      <div class="side-logo">
+        <svg class="glyph"><use href="#sentinel"/></svg>
+        <div>
+          <h1>SENTINEL</h1>
+          <p>v1.0 · console</p>
+        </div>
+      </div>
+      <nav class="nav" id="nav"><!-- injected --></nav>
+      <div class="side-foot">
+        <div class="user-chip">
+          <div class="av" id="userAv">A</div>
+          <div class="meta">
+            <b id="userName">operator</b>
+            <span id="userRole">viewer</span>
+          </div>
+        </div>
+        <div class="sysbar"><span class="dot" id="sysDot"></span><span id="sysText">SYSTEM NOMINAL</span></div>
+        <button class="btn ghost sm block" id="logoutBtn" style="margin-top:12px">⏻ Disconnect</button>
+      </div>
+    </aside>
+
+    <!-- main -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="crumb" id="crumb">CONSOLE / OVERVIEW</div>
+          <h2 id="viewTitle">Overview</h2>
+        </div>
+        <div class="clock"><b id="clock">--:--:--</b><br><span id="date">----</span></div>
+      </header>
+      <section class="view" id="view"><!-- injected --></section>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script src="app.js?v=2"></script>
+</body>
+</html>

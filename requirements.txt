@@ -1,0 +1,37 @@
+# ---- Web / API ----
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+
+# ---- Auth / Security ----
+python-jose[cryptography]==3.3.0
+passlib==1.7.4
+# Pinned: passlib 1.7.4 is incompatible with bcrypt>=4.1 (backend version detection).
+bcrypt==4.0.1
+slowapi==0.1.9
+
+# ---- Database ----
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+pgvector==0.3.6
+greenlet==3.1.1
+
+# ---- ML / CV ----
+onnxruntime-gpu==1.20.1
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+scikit-image==0.25.0
+Pillow==11.0.0
+
+# ---- Utils ----
+structlog==24.4.0
+orjson==3.10.13
+tenacity==9.0.0
+
+# ---- Tests ----
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
