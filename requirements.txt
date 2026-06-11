@@ -19,6 +19,9 @@ alembic==1.14.0
 pgvector==0.3.6
 greenlet==3.1.1
 
+# ---- Distributed state (job store + rate limiters); optional unless REDIS_URL set ----
+redis==5.2.1
+
 # ---- ML / CV ----
 onnxruntime-gpu==1.20.1
 numpy==1.26.4

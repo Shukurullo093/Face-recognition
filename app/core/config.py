@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 10
     DB_ECHO: bool = False
 
+    # ---- Redis (distributed state for multi-worker / multi-replica) ----
+    # When set (e.g. redis://redis:6379/0) the bulk-import job store and the
+    # per-key rate limiters share state across workers, so the app can run with
+    # --workers N and behind a load balancer. Empty -> per-worker in-process
+    # fallback (correct only for a single worker).
+    REDIS_URL: str = ""
+
     # ---- Security ----
     JWT_SECRET_KEY: str = Field(min_length=32)
     JWT_ALGORITHM: str = "HS256"
@@ -63,6 +70,11 @@ class Settings(BaseSettings):
     # ---- Bulk import ----
     IMPORT_BATCH_SIZE: int = 32
     IMPORT_MAX_WORKERS: int = 4
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def redis_enabled(self) -> bool:
+        return bool(self.REDIS_URL)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

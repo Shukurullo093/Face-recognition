@@ -25,7 +25,7 @@ from app.recognition.pipeline import RecognitionPipeline
 from app.repositories.face_repo import FaceRepository
 from app.repositories.log_repo import RecognitionLogRepository
 from app.repositories.person_repo import PersonRepository
-from app.services.job_store import ImportJob, job_store
+from app.services.job_store import ImportJob, JobStore, job_store
 
 log = get_logger(__name__)
 
@@ -33,9 +33,15 @@ _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
 class BulkImportService:
-    def __init__(self, pipeline: RecognitionPipeline, settings: Settings) -> None:
+    def __init__(
+        self,
+        pipeline: RecognitionPipeline,
+        settings: Settings,
+        jobs: JobStore = job_store,
+    ) -> None:
         self.pipeline = pipeline
         self.settings = settings
+        self.jobs = jobs
 
     @staticmethod
     def _discover(root: Path) -> list[tuple[str, Path]]:
@@ -51,12 +57,12 @@ class BulkImportService:
         """Entry point for the background task."""
         root = Path(root_path)
         if not root.is_dir():
-            job.add_error(f"Root path not found or not a directory: {root_path}")
-            job_store.mark_finished(job, failed=True)
+            self.jobs.add_error(job.job_id, f"Root path not found or not a directory: {root_path}")
+            self.jobs.mark_finished(job.job_id, failed=True)
             return
 
         pairs = self._discover(root)
-        job_store.mark_running(job, total=len(pairs))
+        self.jobs.mark_running(job.job_id, total=len(pairs))
         log.info("bulk_import_started", job_id=str(job.job_id), total=len(pairs))
 
         # Group by person so we resolve/create each Person once.
@@ -72,12 +78,13 @@ class BulkImportService:
         if batch:
             await self._process_batch(batch, person_cache, job)
 
-        job_store.mark_finished(job)
+        self.jobs.mark_finished(job.job_id)
+        snap = self.jobs.get(job.job_id)
         log.info(
             "bulk_import_finished",
             job_id=str(job.job_id),
-            succeeded=job.succeeded,
-            failed=job.failed,
+            succeeded=snap.succeeded if snap else 0,
+            failed=snap.failed if snap else 0,
         )
 
     async def _process_batch(
@@ -98,7 +105,7 @@ class BulkImportService:
                 await session.commit()
             except Exception as exc:  # noqa: BLE001 — isolate batch failure
                 await session.rollback()
-                job.add_error(f"Batch failed: {exc}")
+                self.jobs.add_error(job.job_id, f"Batch failed: {exc}")
                 log.error("bulk_import_batch_failed", error=str(exc), exc_info=exc)
 
     async def _process_one(
@@ -111,7 +118,6 @@ class BulkImportService:
         logs: RecognitionLogRepository,
         job: ImportJob,
     ) -> None:
-        job.processed += 1
         try:
             image = cv2.imdecode(
                 np.fromfile(str(img_path), dtype=np.uint8), cv2.IMREAD_COLOR
@@ -139,10 +145,9 @@ class BulkImportService:
                     thumbnail=make_face_thumbnail(image, result.detection.bbox),
                 )
             )
-            job.succeeded += 1
+            self.jobs.record(job.job_id, success=True)
         except Exception as exc:  # noqa: BLE001 — per-image isolation
-            job.failed += 1
-            job.add_error(f"{img_path}: {exc}")
+            self.jobs.record(job.job_id, success=False, error=f"{img_path}: {exc}")
             await logs.record(
                 action=RecognitionAction.IMPORT,
                 success=False,

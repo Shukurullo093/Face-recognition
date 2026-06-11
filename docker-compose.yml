@@ -17,6 +17,18 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build:
       context: .
@@ -25,8 +37,11 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: db
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "8000:8000"
@@ -41,7 +56,10 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    # Run migrations then start server
+    # Run migrations then start server.
+    # State (job store + rate limits) is shared via Redis, so >1 worker / multiple
+    # replicas are now safe. Keep workers low when sharing one GPU — each worker
+    # loads its own ONNX models into VRAM.
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"
