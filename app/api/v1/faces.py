@@ -24,10 +24,12 @@ from app.api.deps import (
     BulkImportServiceDep,
     DBDep,
     RecognitionServiceDep,
+    enforce_enroll_rate_limit,
     require_admin,
     require_operator,
     require_viewer,
 )
+from app.core.rate_limit import exempt_from_global_limit
 from app.core.exceptions import EntityNotFoundError, InvalidImageError
 from app.repositories.face_repo import FaceRepository
 from app.schemas.face import (
@@ -117,9 +119,10 @@ async def register_face(
     "/enroll",
     response_model=FaceRegisterResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_operator)],
+    dependencies=[Depends(require_operator), Depends(enforce_enroll_rate_limit)],
     summary="Enroll a face by person name (find-or-create) — used by client folder import",
 )
+@exempt_from_global_limit
 async def enroll_by_name(
     service: RecognitionServiceDep,
     person_name: Annotated[str, Form()],

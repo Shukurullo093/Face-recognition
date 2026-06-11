@@ -22,6 +22,18 @@ limiter = Limiter(
 )
 
 
+def exempt_from_global_limit(func):
+    """Mark a route exempt from slowapi's global per-IP limit WITHOUT wrapping it.
+
+    `limiter.exempt` wraps the endpoint in a `(*a, **k)` shim, which erases the
+    Form()/File()/Depends markers FastAPI reads off the signature (turning body
+    params into required query params -> 422). We register the route name on the
+    limiter directly instead, so the function is returned untouched.
+    """
+    limiter._exempt_routes.add(f"{func.__module__}.{func.__name__}")
+    return func
+
+
 def parse_rate(spec: str) -> tuple[int, float]:
     """Parse a "N/period" spec into (limit, window_seconds). Defaults to per-minute."""
     try:
@@ -54,3 +66,8 @@ class KeyRateLimiter:
 
 
 external_rate_limiter = KeyRateLimiter()
+
+# Per-IP limiter for /faces/enroll. The endpoint takes File/Form params, so we can't
+# use slowapi's decorator (it mangles the route signature); instead the route is
+# exempted from the global slowapi limit and this is applied as a dependency.
+enroll_rate_limiter = KeyRateLimiter()

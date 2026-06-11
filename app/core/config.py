@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     RATE_LIMIT: str = "100/minute"
     EXTERNAL_RATE_LIMIT: str = "60/minute"   # per-API-key limit for /external/search
+    ENROLL_RATE_LIMIT: str = "3000/minute"   # per-IP limit for /faces/enroll (client bulk import loops it)
 
     # ---- Recognition models ----
     # Relative paths resolve from the working dir (project root locally, /app in

@@ -19,7 +19,7 @@ from app.core.exceptions import (
     AuthorizationError,
     RateLimitExceededError,
 )
-from app.core.rate_limit import external_rate_limiter, parse_rate
+from app.core.rate_limit import enroll_rate_limiter, external_rate_limiter, parse_rate
 from app.core.security import Role, decode_access_token, hash_api_key
 from app.db.session import get_db
 from app.models.api_key import ApiKey
@@ -133,6 +133,16 @@ async def get_api_key(
         raise RateLimitExceededError(f"API key rate limit exceeded ({_settings.EXTERNAL_RATE_LIMIT})")
     await repo.touch(entity.id, datetime.now(UTC))  # committed by get_db
     return entity
+
+
+def enforce_enroll_rate_limit(request: Request) -> None:
+    """Per-IP limit for /faces/enroll, separate (and higher) than the global limit
+    so the client's sequential bulk-import loop isn't throttled by it."""
+    from slowapi.util import get_remote_address
+
+    limit, window = parse_rate(_settings.ENROLL_RATE_LIMIT)
+    if not enroll_rate_limiter.allow(get_remote_address(request), limit, window):
+        raise RateLimitExceededError(f"Enroll rate limit exceeded ({_settings.ENROLL_RATE_LIMIT})")
 
 
 def get_external_recognition_service(
