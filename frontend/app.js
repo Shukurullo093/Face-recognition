@@ -64,7 +64,7 @@ const NAV = [
 // ============================================================================
 // API
 // ============================================================================
-async function api(path, { method = 'GET', body = null, form = null } = {}) {
+async function api(path, { method = 'GET', body = null, form = null, meta = false } = {}) {
   const headers = {};
   if (S.token) headers.Authorization = 'Bearer ' + S.token;
   let payload = null;
@@ -91,6 +91,10 @@ async function api(path, { method = 'GET', body = null, form = null } = {}) {
       else if (Array.isArray(data.detail)) msg = data.detail.map((d) => d.msg).join('; ');
     }
     throw new Error(msg);
+  }
+  if (meta) {
+    const tc = res.headers.get('X-Total-Count');
+    return { data, total: tc != null ? parseInt(tc, 10) : (Array.isArray(data) ? data.length : 0) };
   }
   return data;
 }
@@ -693,8 +697,27 @@ VIEWS.search = { title: 'Identify 1:N', render: async (root) => {
   cols.appendChild(right);
 
   // Preload gallery thumbnails for the "flip-through-the-database" animation.
+  // Faces are stored newest-first and bulk imports cluster ~100 faces per
+  // person, so a single offset=0 page is almost all ONE identity. Sample a few
+  // evenly-spaced offsets across the whole table so the scan flips through
+  // genuinely different people.
   let gallery = [];
-  try { gallery = await api('/faces?limit=60'); } catch { /* ignore */ }
+  try {
+    const PAGE = 60;
+    const first = await api(`/faces?limit=${PAGE}`, { meta: true });
+    gallery = first.data;
+    const total = first.total;
+    if (total > PAGE) {
+      const stride = Math.floor(total / 5);                 // up to 4 more spread-out pages
+      const offsets = [stride, stride * 2, stride * 3, stride * 4]
+        .filter((o) => o > 0 && o < total);
+      const extra = await Promise.all(
+        offsets.map((o) => api(`/faces?limit=${PAGE}&offset=${o}`).catch(() => []))
+      );
+      const seen = new Set(gallery.map((f) => f.id));
+      for (const page of extra) for (const f of page) if (!seen.has(f.id)) { seen.add(f.id); gallery.push(f); }
+    }
+  } catch { /* ignore */ }
   const thumbs = gallery.map((f) => f.thumbnail).filter(Boolean);
   scan.placeholder(thumbs.length ? `${thumbs.length} faces in gallery` : 'Gallery empty');
 
@@ -834,23 +857,33 @@ VIEWS.gallery = { title: 'Face Gallery', render: async (root) => {
         <div class="brackets"><span></span><span></span><span></span><span></span></div>
         <div class="panel-head"><h3>Enrolled Faces</h3><button class="btn sm ghost" id="gRefresh">↻ Refresh</button></div>
         <div class="panel-body" id="gGrid"><div class="empty"><span class="spin"></span></div></div>
+        <div class="pager" id="gPager"></div>
       </div>
       <div class="panel pad face-detail" id="gDetail">
         <div class="brackets"><span></span><span></span><span></span><span></span></div>
         <div class="empty">${I.face}<p>Select a face to inspect its 512-D embedding</p></div>
       </div>
     </div>`;
-  $('#gRefresh', root).addEventListener('click', load);
+  $('#gRefresh', root).addEventListener('click', () => load(page));
   let faces = [];
-  await load();
+  const PAGE_SIZE = 60;          // backend caps /faces?limit at 60
+  let page = 0;                  // 0-based current page
+  let total = 0;                 // total faces across all persons (from X-Total-Count)
+  await load(0);
 
-  async function load() {
+  async function load(p = page) {
+    page = Math.max(0, p);
     const grid = $('#gGrid', root);
     grid.innerHTML = `<div class="empty"><span class="spin"></span></div>`;
     try {
-      faces = await api('/faces?limit=60');
-    } catch (e) { grid.innerHTML = emptyState(e.message); return; }
-    if (!faces.length) { grid.innerHTML = emptyState('No faces enrolled yet'); return; }
+      const res = await api(`/faces?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`, { meta: true });
+      faces = res.data; total = res.total;
+    } catch (e) { grid.innerHTML = emptyState(e.message); $('#gPager', root).innerHTML = ''; return; }
+    if (!faces.length) {
+      if (page > 0 && total > 0) return load(page - 1);   // page emptied (e.g. after delete) → step back
+      grid.innerHTML = emptyState('No faces enrolled yet'); $('#gPager', root).innerHTML = ''; return;
+    }
+    renderPager();
 
     grid.innerHTML = `<div class="face-grid">` + faces.map((f) => `
       <div class="face-card" data-id="${f.id}">
@@ -869,6 +902,20 @@ VIEWS.gallery = { title: 'Face Gallery', render: async (root) => {
       fingerprint(cardEl.querySelector('canvas.fp'), f.embedding, 64);
       cardEl.addEventListener('click', () => showDetail(f, cardEl));
     });
+  }
+
+  function renderPager() {
+    const pager = $('#gPager', root);
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const from = page * PAGE_SIZE + 1;
+    const to = page * PAGE_SIZE + faces.length;
+    pager.innerHTML = `
+      <button class="btn sm ghost" id="gPrev" ${page <= 0 ? 'disabled' : ''}>‹ Prev</button>
+      <span class="pager-info">${from}–${to} of ${total} · page ${page + 1}/${pages}</span>
+      <button class="btn sm ghost" id="gNext" ${page >= pages - 1 ? 'disabled' : ''}>Next ›</button>`;
+    const prev = $('#gPrev', pager), next = $('#gNext', pager);
+    if (prev) prev.onclick = () => load(page - 1);
+    if (next) next.onclick = () => load(page + 1);
   }
 
   const canEdit = can('operator');

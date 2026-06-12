@@ -47,6 +47,18 @@ class RecognitionPipeline:
     @classmethod
     def from_settings(cls, settings: Settings) -> "RecognitionPipeline":
         providers = settings.onnx_providers_list
+        # When a GPU provider is requested, preload the CUDA/cuDNN shared libs
+        # that ship in the nvidia-*-cu12 pip wheels. Without this, ORT cannot
+        # find libcublasLt.so.12 etc. unless they are on LD_LIBRARY_PATH and
+        # silently falls back to CPU (~8x slower).
+        if any("CUDA" in p or "Tensorrt" in p for p in providers):
+            try:
+                import onnxruntime as ort
+
+                ort.preload_dlls()
+                log.info("onnx_cuda_dlls_preloaded")
+            except Exception as e:  # pragma: no cover - depends on ORT version/env
+                log.warning("onnx_preload_dlls_failed", error=str(e))
         detector = SCRFDetector(
             model_path=settings.DETECTOR_MODEL_PATH,
             providers=providers,
@@ -127,3 +139,19 @@ class RecognitionPipeline:
     async def process_all(self, image_bgr: np.ndarray) -> list[FaceResult]:
         """Detect & embed all valid faces (batched)."""
         return await asyncio.to_thread(self._process_all, image_bgr)
+
+    # ---------- warmup ----------
+    def warmup(self) -> None:
+        """Run one dummy detect + embed so the first real request is fast.
+
+        On new GPU architectures (e.g. Blackwell/sm_120) ORT JIT-compiles CUDA
+        kernels on first inference — a ~5s one-time cost we'd rather absorb at
+        startup than serve to the first user.
+        """
+        try:
+            dummy = np.zeros((self.detector.input_size[1], self.detector.input_size[0], 3), np.uint8)
+            self.detector.detect(dummy, max_num=1)
+            self.embedder.embed(np.zeros((112, 112, 3), np.uint8))
+            log.info("pipeline_warmed_up")
+        except Exception as e:  # pragma: no cover - warmup is best-effort
+            log.warning("pipeline_warmup_failed", error=str(e))

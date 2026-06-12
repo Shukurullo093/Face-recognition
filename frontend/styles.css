@@ -79,6 +79,25 @@ body::after {
   color: var(--muted);
 }
 .mono { font-family: var(--mono); }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 4px 2px;
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.pager:empty { display: none; }
+.pager-info {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pager .btn[disabled] { opacity: .35; cursor: not-allowed; }
 .accent { color: var(--accent); }
 .danger { color: var(--danger); }
 .cyan   { color: var(--cyan); }

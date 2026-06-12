@@ -12,9 +12,11 @@ __pycache__/
 .env
 
 # Models & data (large / private)
-models/
+# Anchored to repo root so the ONNX model dir is ignored but the app/models
+# Python package (ORM entities) is NOT.
+/models/
 *.onnx
-data/
+/data/
 
 # OS
 .DS_Store

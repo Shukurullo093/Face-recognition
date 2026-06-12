@@ -42,6 +42,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         app.state.pipeline = RecognitionPipeline.from_settings(settings)
         log.info("models_loaded")
+        # Absorb first-inference JIT/warmup cost at startup, not on the first request.
+        app.state.pipeline.warmup()
 
     # Bootstrap a first admin in non-production if configured.
     bootstrap_user = os.getenv("BOOTSTRAP_ADMIN_USER")

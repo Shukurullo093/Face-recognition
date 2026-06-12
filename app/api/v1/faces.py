@@ -66,11 +66,18 @@ async def _read_image(file: UploadFile) -> bytes:
 )
 async def list_faces(
     db: DBDep,
+    response: Response,
     limit: Annotated[int, Query(ge=1, le=60)] = 24,
     offset: Annotated[int, Query(ge=0)] = 0,
     person_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> list[FaceGalleryItem]:
-    rows = await FaceRepository(db).list_with_person(
+    repo = FaceRepository(db)
+    # Expose the full (filtered) row count so the gallery can paginate; the
+    # response body is capped at `limit`, otherwise the newest bulk-import
+    # batch (one person, ~100 faces) fills every page.
+    response.headers["X-Total-Count"] = str(await repo.count(person_id=person_id))
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
+    rows = await repo.list_with_person(
         limit=limit, offset=offset, person_id=person_id
     )
     items: list[FaceGalleryItem] = []

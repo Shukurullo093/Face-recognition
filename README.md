@@ -104,6 +104,8 @@ sudo systemctl restart postgresql
 docker rm -f fr-pgvector                      # konteynerni o'chirish
 alembic upgrade head                          # lokal PG'da schema + HNSW yaratadi
 python -m scripts.create_admin admin 'StrongPass123'
+
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 Requires the **NVIDIA Container Toolkit** for GPU passthrough.

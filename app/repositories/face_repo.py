@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.face import Face
@@ -65,7 +65,11 @@ class FaceRepository(BaseRepository[Face]):
         # SET does not accept bind params in PostgreSQL; inline the validated int.
         await self.session.execute(text(f"SET LOCAL hnsw.ef_search = {int(self.ef_search)}"))
 
-        active_clause = "AND p.is_active = true" if only_active else ""
+        # Filter on faces.is_active (a trigger-synced mirror of persons.is_active)
+        # so the planner can use the PARTIAL HNSW index `ix_faces_embedding_hnsw_active`
+        # — the active filter becomes a pre-filter on the index instead of a
+        # post-filter that drops recall after the ANN scan returns its candidates.
+        active_clause = "AND f.is_active" if only_active else ""
         stmt = text(
             f"""
             SELECT f.id            AS face_id,
@@ -118,7 +122,8 @@ class FaceRepository(BaseRepository[Face]):
             return None
         return row.face_id, float(row.similarity)
 
-    async def count(self) -> int:
-        from sqlalchemy import func
-
-        return await self.session.scalar(select(func.count()).select_from(Face)) or 0
+    async def count(self, person_id: uuid.UUID | None = None) -> int:
+        stmt = select(func.count()).select_from(Face)
+        if person_id is not None:
+            stmt = stmt.where(Face.person_id == person_id)
+        return await self.session.scalar(stmt) or 0
